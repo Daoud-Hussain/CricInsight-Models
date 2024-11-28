@@ -14,9 +14,9 @@ from utils import compute_features  # Import feature extraction from utils
 
 # S3 Video Download Function
 def download_video(s3_url, local_path):
-    s3 = boto3.client('s3')
-    bucket_name, key = s3_url.replace("s3://", "").split("/", 1)
-    s3.download_file(bucket_name, key, local_path)
+    s3_url = s3_url.replace("s3://", "")
+    bucket_name = "cricinsight-videos-bucket"  # Fixed bucket name
+    key = s3_url.replace("videos/", "", 1) 
 
 # Load the trained LSTM model
 model = load_model('models/advanced_lstm_model.h5')
@@ -155,4 +155,3 @@ if __name__ == "__main__":
     # Display shot counts and percentages
     print(f"Shot Counts: {shot_count}")
     print(f"Shot Percentages: {shot_percentage}")
-
