@@ -7,3 +7,8 @@ pandas
 boto3
 argparse
 joblib
+flask
+opencv-python-headless
+
+
+
