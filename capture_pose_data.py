@@ -1,4 +1,4 @@
-import cv2
+import cv1
 import mediapipe as mp
 import pandas as pd
 import os

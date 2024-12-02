@@ -1,0 +1,16 @@
+# Ignore Python bytecode and compiled files
+__pycache__/
+
+# Ignore swap files (e.g., from Vim)
+*.swp
+
+# Ignore the virtual environment directory
+venv/
+
+# Ignore output directory
+output/
+
+# Optionally ignore specific files (if needed later)
+# capture_pose_data.py
+# video_prediction.py
+

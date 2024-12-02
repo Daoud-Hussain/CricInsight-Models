@@ -1,22 +1,25 @@
-import argparse
-import boto3
 import cv2
 import numpy as np
 import tensorflow as tf
 from collections import deque
 import mediapipe as mp
-import joblib  # To load the scaler and label encoder
-import pandas as pd  # To save results to CSV
+import joblib
+import pandas as pd
 import os
-import datetime  # To track timestamps for appending test cases
+import datetime
 from tensorflow.keras.models import load_model
-from utils import compute_features  # Import feature extraction from utils
+from utils import compute_features
 
-# S3 Video Download Function
-def download_video(s3_url, local_path):
-    s3_url = s3_url.replace("s3://", "")
-    bucket_name = "cricinsight-videos-bucket"  # Fixed bucket name
-    key = s3_url.replace("videos/", "", 1) 
+# Disable GPU logging and warnings
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+import tensorflow as tf
+tf.get_logger().setLevel('ERROR')
+
+# Explicitly disable GPU if not needed
+try:
+    tf.config.set_visible_devices([], 'GPU')
+except:
+    pass
 
 # Load the trained LSTM model
 model = load_model('models/advanced_lstm_model.h5')
@@ -35,25 +38,12 @@ mp_drawing = mp.solutions.drawing_utils
 # Rolling window for smoothing predictions
 prediction_window = deque(maxlen=5)
 
-# Argument Parser
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Video Processing Script")
-    parser.add_argument("--video_url", required=True, help="S3 URL of the video to process")
-    args = parser.parse_args()
+# Path to the video (update the path or use a live feed)
+video_path = r"/home/ubuntu/CricInsight-Models/video.mp4"
 
-    # Local path to save the video
-    local_video_path = "/tmp/video.mp4"
-
-    # Download video from S3
-    print(f"Downloading video from {args.video_url}...")
-    download_video(args.video_url, local_video_path)
-    print(f"Video downloaded to {local_video_path}.")
-
+def process_video(video_path):
     # Track shot count for real-time detection (adjusted for new shot types)
     shot_count = {'cut': 0, 'pull': 0, 'cover_drive': 0, 'straight_drive': 0, 'flick': 0}
-
-    # Open the downloaded video
-    cap = cv2.VideoCapture(local_video_path)
 
     def extract_video_features(pose_landmarks):
         """
@@ -77,11 +67,21 @@ if __name__ == "__main__":
         features = np.array([compute_features(keypoints)])
         return features
 
+    # Open video capture
+    cap = cv2.VideoCapture(video_path)
+    
+    # Prepare to save processed frames (optional)
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out = cv2.VideoWriter('output/processed_video.mp4', fourcc, 20.0, (640, 480))
+
+    frames_processed = 0
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret:
-            print("Failed to capture video frame.")
             break
+
+        # Resize frame to a standard size
+        frame = cv2.resize(frame, (640, 480))
 
         # Convert the frame to RGB for MediaPipe
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -112,46 +112,55 @@ if __name__ == "__main__":
 
             # Display the predicted shot label in large red font on the frame
             cv2.putText(frame, f"Shot: {shot_label.upper()}", (50, 100), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 3, (0, 0, 255), 5, cv2.LINE_AA)
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2, cv2.LINE_AA)
 
-        # Show the frame
-        cv2.imshow('Video Shot Detection', frame)
+        # Write the frame to output video
+        out.write(frame)
+        frames_processed += 1
 
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
-
+    # Release resources
     cap.release()
-    cv2.destroyAllWindows()
+    out.release()
 
     # Calculate total shots
     total_shots = sum(shot_count.values())
 
     # Calculate percentages of each shot
-    shot_percentage = {shot: (count / total_shots) * 100 if total_shots > 0 else 0 for shot, count in shot_count.items()}
+    shot_percentage = {shot: (count / total_shots) * 100 if total_shots > 0 else 0 
+                       for shot, count in shot_count.items()}
 
     # Prepare data for CSV (including timestamp to append new test cases)
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     shot_data = {
-        'Timestamp': [timestamp] * len(shot_count),  # Same timestamp for all rows
+        'Timestamp': [timestamp] * len(shot_count),
         'Shot Type': list(shot_count.keys()),
         'Shot Count': list(shot_count.values()),
         'Percentage': [round(shot_percentage[shot], 2) for shot in shot_count]
     }
 
-    # Save shot count and percentages to CSV (append if file exists)
-    output_path = 'output/shot_analysis.csv'
-    output_dir = os.path.dirname(output_path)
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
+    # Ensure output directory exists
+    output_dir = 'output'
+    os.makedirs(output_dir, exist_ok=True)
 
-    # Append new data to the file if it exists, else create it
-    if os.path.exists(output_path):
-        pd.DataFrame(shot_data).to_csv(output_path, mode='a', header=False, index=False)
-    else:
-        pd.DataFrame(shot_data).to_csv(output_path, index=False)
+    # Save shot count and percentages to CSV
+    output_path = os.path.join(output_dir, 'shot_analysis.csv')
+    pd.DataFrame(shot_data).to_csv(output_path, mode='a', header=not os.path.exists(output_path), index=False)
 
-    print(f"Shot analysis saved to {output_path}")
+    # Prepare return dictionary
+    return {
+        'shot_counts': shot_count,
+        'shot_percentages': shot_percentage,
+        'frames_processed': frames_processed,
+        'output_video': 'output/processed_video.mp4',
+        'output_csv': output_path
+    }
 
-    # Display shot counts and percentages
-    print(f"Shot Counts: {shot_count}")
-    print(f"Shot Percentages: {shot_percentage}")
+# If script is run directly
+if __name__ == '__main__':
+    # Process the video
+    results = process_video(video_path)
+    
+    # Print results
+    print("Shot Counts:", results['shot_counts'])
+    print("Shot Percentages:", results['shot_percentages'])
+    print("Frames Processed:", results['frames_processed'])
